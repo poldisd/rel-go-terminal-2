@@ -476,7 +476,9 @@ function computeGraph(d){
 
   cats.forEach(cat=>{
     const catId = d.ticker + "::" + cat.key;
-    nodes.push({id:catId, type:"category", catKey:cat.key, label:CAT_LABEL[cat.key], count:cat.items.length, desc:CAT_DESC[cat.key]});
+    const isLive = (cat.key==="banks" && d._realBanks) || (cat.key==="board" && d._realBoard);
+    const label = CAT_LABEL[cat.key] + (isLive ? " ★LIVE" : "");
+    nodes.push({id:catId, type:"category", catKey:cat.key, label, count:cat.items.length, desc:CAT_DESC[cat.key] + (isLive ? " (Live-Daten via Finnhub)" : "")});
     links.push({source:d.ticker, target:catId});
 
     if(expanded.has(catId)){
@@ -497,7 +499,7 @@ function computeGraph(d){
 function getRadius(n){
   if(n.type==="center") return 32;
   if(n.type==="category") return 26;
-  if(n.type==="customers" || n.type==="suppliers") return SIZE_RADIUS[n.size] || 18;
+  if(n.type==="customers" || n.type==="suppliers" || n.type==="banks") return SIZE_RADIUS[n.size] || 18;
   return 18;
 }
 
@@ -511,6 +513,25 @@ function buildGraph(key){
 
   initSvg();
   render(d);
+  loadRealNetworkData(d);
+}
+
+// replaces the sample "Banks" (analyst coverage) and "Board" (insiders)
+// data with real Finnhub-backed data, once per dataset. Silently keeps
+// the sample data if the fetch fails (e.g. no key set, invalid symbol).
+async function loadRealNetworkData(d){
+  if(d._networkChecked) return;
+  d._networkChecked = true;
+  try{
+    const resp = await fetch(`/api/network?symbol=${encodeURIComponent(d.ticker)}`);
+    const data = await resp.json();
+    if(!resp.ok) throw new Error(data.error || ("HTTP " + resp.status));
+    if(data.banks && data.banks.length){ d.banks = data.banks; d._realBanks = true; }
+    if(data.board && data.board.length){ d.board = data.board; d._realBoard = true; }
+    if(currentKey && getDataset(currentKey) === d){ render(d); }
+  } catch(err){
+    console.error("Live-Netzwerkdaten (Banks/Board) nicht verfügbar:", err.message);
+  }
 }
 
 function render(d){
@@ -692,9 +713,11 @@ function renderModalContent(d, state){
     {key:"customers", items:d.customers},
     {key:"suppliers", items:d.suppliers}
   ];
-  const catRows = cats.map(c=>
-    `<div class="cat-row"><span><span class="cat-dot" style="background:${COLOR[c.key]}"></span>${CAT_LABEL[c.key]}</span><span>${c.items.length}</span></div>`
-  ).join("");
+  const catRows = cats.map(c=>{
+    const isLive = (c.key==="banks" && d._realBanks) || (c.key==="board" && d._realBoard);
+    const liveTag = isLive ? ` <span style="color:var(--green); font-size:9px;">★ LIVE</span>` : "";
+    return `<div class="cat-row"><span><span class="cat-dot" style="background:${COLOR[c.key]}"></span>${CAT_LABEL[c.key]}${liveTag}</span><span>${c.items.length}</span></div>`;
+  }).join("");
 
   const footNote = state.status === "error"
     ? `Live-Kurs konnte nicht geladen werden (${state.message}) — zeige stattdessen Beispieldaten.`
