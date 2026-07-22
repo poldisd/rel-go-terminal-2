@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>REL&lt;GO&gt; :: Relationship Map</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+
+  :root{
+    --bg:#0a0a0a;
+    --panel:#101010;
+    --line:#242424;
+    --amber:#ff9500;
+    --amber-dim:#8a5200;
+    --text:#e8e8e3;
+    --text-dim:#7a7a76;
+    --green:#3ecf5c;
+    --orange:#ff7a3d;
+    --blue:#4d9fff;
+    --red:#ff4d4d;
+    --panel-w:300px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:'IBM Plex Mono', monospace;
+    height:100%;
+    overflow:hidden;
+  }
+  body{ display:flex; flex-direction:column; }
+
+  #statusbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:6px 14px;
+    background:#000;
+    border-bottom:1px solid var(--line);
+    font-size:11px;
+    color:var(--text-dim);
+    letter-spacing:0.5px;
+  }
+  #statusbar .brand{ color:var(--amber); font-weight:700; }
+  #clock{ font-variant-numeric: tabular-nums; }
+
+  #cmdbar{
+    display:flex; align-items:center; gap:8px;
+    padding:10px 14px;
+    background:var(--panel);
+    border-bottom:1px solid var(--line);
+  }
+  #cmdbar .prompt{ color:var(--amber); font-weight:700; font-size:14px; }
+  #cmdline{
+    flex:1;
+    background:transparent;
+    border:none;
+    outline:none;
+    color:var(--text);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:14px;
+    letter-spacing:1px;
+    text-transform:uppercase;
+  }
+  #cmdline::placeholder{ color:var(--text-dim); text-transform:none; letter-spacing:0.2px;}
+  .go-btn{
+    background:var(--amber);
+    color:#000;
+    border:none;
+    font-family:'IBM Plex Mono', monospace;
+    font-weight:700;
+    font-size:12px;
+    padding:6px 12px;
+    letter-spacing:1px;
+    cursor:pointer;
+  }
+  .go-btn:hover{ background:#ffb033; }
+  .cursor-blink{
+    display:inline-block; width:8px; height:16px; background:var(--amber);
+    animation:blink 1s steps(1) infinite;
+    margin-left:2px;
+  }
+  @keyframes blink{ 50%{ opacity:0; } }
+
+  #tickers{
+    display:flex; gap:6px; padding:0 14px 10px 14px; background:var(--panel);
+    border-bottom:1px solid var(--line);
+    flex-wrap:wrap;
+  }
+  .ticker-chip{
+    border:1px solid var(--line);
+    color:var(--text-dim);
+    background:#0d0d0d;
+    font-size:11px;
+    padding:4px 9px;
+    cursor:pointer;
+    letter-spacing:0.5px;
+  }
+  .ticker-chip:hover, .ticker-chip.active{
+    border-color:var(--amber);
+    color:var(--amber);
+  }
+
+  #main{ flex:1; display:flex; min-height:0; position:relative; }
+  #graph-wrap{ flex:1; position:relative; min-width:0; }
+  svg{ width:100%; height:100%; display:block; }
+
+  #tooltip{
+    position:absolute;
+    display:none;
+    max-width:220px;
+    background:#111;
+    border:1px solid var(--amber);
+    padding:9px 11px;
+    font-size:11px;
+    line-height:1.5;
+    color:var(--text);
+    box-shadow:0 6px 18px rgba(0,0,0,0.6);
+    z-index:20;
+    pointer-events:auto;
+  }
+  #tooltip .tt-title{
+    color:var(--amber); font-weight:700; font-size:11px;
+    margin-bottom:4px; padding-right:16px;
+  }
+  #tooltip .tt-close{
+    position:absolute; top:5px; right:7px;
+    cursor:pointer; color:var(--text-dim); font-size:11px;
+  }
+  #tooltip .tt-close:hover{ color:var(--text); }
+  #tooltip .tt-tag{
+    display:inline-block; font-size:9px; color:var(--text-dim);
+    margin-top:5px; letter-spacing:0.5px;
+  }
+
+  #search-status{
+    font-size:10px; color:var(--amber); letter-spacing:0.5px;
+    white-space:nowrap;
+  }
+  .ticker-chip.generated{ border-style:dashed; }
+  .gen-badge{
+    display:inline-block; font-size:9px; color:var(--amber); border:1px solid var(--amber-dim);
+    padding:1px 5px; margin-left:6px; letter-spacing:0.5px;
+  }
+
+  #hint{
+    position:absolute; top:14px; left:14px;
+    font-size:10px; color:var(--text-dim);
+    max-width:260px; line-height:1.5;
+  }
+
+  /* ---- stock detail modal (opens on center-node click) ---- */
+  .modal-overlay{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,0.75);
+    display:none; align-items:center; justify-content:center;
+    z-index:50;
+  }
+  .modal-overlay.open{ display:flex; }
+  .modal-box{
+    background:var(--panel);
+    border:1px solid var(--amber);
+    width:90%; max-width:480px; max-height:82vh;
+    overflow-y:auto;
+    padding:22px 24px;
+    position:relative;
+    box-shadow:0 10px 40px rgba(0,0,0,0.7);
+  }
+  .modal-close{
+    position:absolute; top:10px; right:12px;
+    background:none; border:none; color:var(--text-dim);
+    font-size:15px; cursor:pointer; font-family:'IBM Plex Mono', monospace;
+  }
+  .modal-close:hover{ color:var(--text); }
+  .modal-title{ font-size:19px; color:var(--amber); font-weight:700; }
+  .modal-sub{ font-size:11px; color:var(--text-dim); margin-top:2px; margin-bottom:14px; }
+  .modal-desc{ font-size:12px; line-height:1.6; color:var(--text); margin-bottom:16px; }
+  .metric-grid{
+    display:grid; grid-template-columns:1fr 1fr; gap:12px 18px;
+    margin-bottom:16px;
+  }
+  .metric .label{ font-size:9px; color:var(--text-dim); letter-spacing:0.5px; }
+  .metric .value{ font-size:14px; margin-top:2px; }
+  .metric .value.pos{ color:var(--green); }
+  .metric .value.neg{ color:var(--red); }
+  .modal-section-title{
+    font-size:11px; color:var(--amber); letter-spacing:1px;
+    border-top:1px solid var(--line); padding-top:10px; margin-top:4px; margin-bottom:8px;
+  }
+  .cat-row{
+    display:flex; justify-content:space-between; align-items:center;
+    font-size:12px; padding:5px 0; border-bottom:1px solid var(--line);
+  }
+  .cat-row:last-child{ border-bottom:none; }
+  .cat-dot{ width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:7px; }
+
+  .node circle{ stroke:#000; stroke-width:1.5px; cursor:pointer; }
+  .node rect.label-bg{ fill:#000; opacity:0.82; pointer-events:none; }
+  .node text{
+    fill:var(--text); font-size:9px; font-family:'IBM Plex Mono', monospace;
+    pointer-events:none;
+  }
+  .node.center circle{ stroke:var(--amber); stroke-width:2px; }
+  .node.center text{ font-size:11px; font-weight:700; fill:var(--amber); }
+
+  .node.category circle{ stroke-width:2px; stroke-dasharray:0; }
+  .node.category.expanded circle{ stroke:#fff; }
+  .node.category text{ font-size:10px; font-weight:700; }
+  .node.category .badge{ fill:var(--text-dim); font-size:8px; font-weight:400; }
+  .node.category .plusminus{
+    fill:#000; font-size:11px; font-weight:700; text-anchor:middle; dominant-baseline:central;
+  }
+
+  .link{ stroke:#3a3a3a; stroke-width:1px; }
+  .node:hover circle{ filter:brightness(1.4); }
+
+  #footer{
+    padding:5px 14px;
+    background:#000;
+    border-top:1px solid var(--line);
+    font-size:10px;
+    color:var(--text-dim);
+    display:flex; justify-content:space-between;
+  }
+</style>
+</head>
+<body>
+
+<div id="statusbar">
+  <div><span class="brand">REL&lt;GO&gt;</span> relationship map terminal</div>
+  <div id="clock"></div>
+</div>
+
+<div id="cmdbar">
+  <span class="prompt">&gt;</span>
+  <input id="cmdline" type="text" placeholder="Ticker oder Firmenname eingeben, z.B. LNG, AAPL, oder z.B. 'Nvidia'..." />
+  <span class="cursor-blink"></span>
+  <span id="search-status"></span>
+  <button class="go-btn" id="go-btn" onclick="runCommand()">GO ▸</button>
+</div>
+<div id="tickers"></div>
+
+<div id="main">
+  <div id="graph-wrap">
+    <div id="hint">Ticker/Firmenname eingeben + GO für neue Karte · klick auf LNG/Mittelpunkt = alle Kennzahlen · klick auf Oberbegriff zum Aufklappen · klick auf einen Punkt = Erklärung · scrollen = zoom</div>
+    <svg></svg>
+    <div id="tooltip"></div>
+  </div>
+</div>
+
+<div id="stock-modal" class="modal-overlay" onclick="if(event.target===this) closeStockModal()">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeStockModal()">✕ CLOSE</button>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<div id="footer">
+  <span>4 DEMO-DATENSÄTZE · SUCHE ERZEUGT KI-DATEN (unverifiziert) · keine Anlageberatung</span>
+  <span id="nodecount"></span>
+</div>
+
+<script>
+// ---------------------------------------------------------------
+// Sample relationship datasets. Graph is hierarchical: center ->
+// category nodes (Holders / Board / Banks) -> individual entities,
+// revealed on click (drill-down).
+// ---------------------------------------------------------------
+const DATASETS = {
+  LNG: {
+    name: "Cheniere Energy", ticker: "LNG", sector: "LNG / Energy Infrastructure",
+    price: "$228.40", change: "+1.2%", changeSign:"pos",
+    marketCap:"$52.3B", peRatio:"19.4", divYield:"1.2%", week52:"$155 – $258", volume:"1.8M", beta:"0.85",
+    desc: "Größter LNG-Exporteur der USA, betreibt Verflüssigungsanlagen in Texas und Louisiana.",
+    holders: [
+      {name:"Vanguard Group", desc:"Einer der größten Vermögensverwalter weltweit, bekannt für passive Indexfonds."},
+      {name:"BlackRock", desc:"Größter Vermögensverwalter der Welt, u.a. Anbieter der iShares-ETFs."},
+      {name:"State Street", desc:"Vermögensverwalter, bekannt für die SPDR-ETF-Familie."},
+      {name:"Capital Research", desc:"Aktives Fondshaus (Capital Group), verwaltet u.a. die American Funds."},
+      {name:"T. Rowe Price", desc:"Aktiver Vermögensverwalter mit Fokus auf fundamentale Analyse."}
+    ],
+    board: [
+      {name:"Jack Fusco (CEO)", desc:"Vorstandsvorsitzender, verantwortlich für die operative Führung des Unternehmens."},
+      {name:"Randy Bhatia", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"Nuna Beattie", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"David Foley", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"Vicky Bailey", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."}
+    ],
+    banks: [
+      {name:"Morgan Stanley", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"JPMorgan", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Goldman Sachs", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Barclays", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Citi", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."}
+    ],
+    customers: [
+      {name:"TotalEnergies", size:"large", desc:"Französischer Energiekonzern, kauft LNG per langfristigem Liefervertrag."},
+      {name:"PetroChina", size:"large", desc:"Chinesischer Staatskonzern, einer der größten LNG-Importeure Asiens."},
+      {name:"EDF", size:"medium", desc:"Französischer Stromversorger, nutzt LNG zur Stromerzeugung."},
+      {name:"Centrica", size:"medium", desc:"Britischer Energieversorger (u.a. Marke British Gas)."},
+      {name:"Naturgy", size:"small", desc:"Spanischer Energiekonzern, Gas- und Stromversorger."}
+    ],
+    suppliers: [
+      {name:"Kinder Morgan (Feedgas)", size:"large", desc:"US-Pipelinebetreiber, liefert das Erdgas zur Verflüssigungsanlage."},
+      {name:"Bechtel (EPC)", size:"medium", desc:"Baukonzern, errichtet die LNG-Anlagen (Engineering, Procurement, Construction)."},
+      {name:"Chart Industries", size:"small", desc:"Hersteller von Kryotechnik-Ausrüstung für LNG-Anlagen."}
+    ]
+  },
+  BKR: {
+    name: "Baker Hughes", ticker: "BKR", sector: "Energy Services & Equipment",
+    price: "$45.10", change: "+0.6%", changeSign:"pos",
+    marketCap:"$44.8B", peRatio:"16.2", divYield:"2.1%", week52:"$32 – $47", volume:"6.2M", beta:"1.1",
+    desc: "Öl- und Gas-Dienstleister, liefert Ausrüstung und Services für Förderung & Verarbeitung.",
+    holders: [
+      {name:"Vanguard Group", desc:"Einer der größten Vermögensverwalter weltweit, bekannt für passive Indexfonds."},
+      {name:"BlackRock", desc:"Größter Vermögensverwalter der Welt, u.a. Anbieter der iShares-ETFs."},
+      {name:"State Street", desc:"Vermögensverwalter, bekannt für die SPDR-ETF-Familie."},
+      {name:"Fidelity", desc:"Großer aktiver und passiver Vermögensverwalter aus den USA."},
+      {name:"Wellington", desc:"Traditionsreicher aktiver Vermögensverwalter, meist institutionelle Kunden."}
+    ],
+    board: [
+      {name:"Lorenzo Simonelli (CEO)", desc:"Vorstandsvorsitzender, verantwortlich für die operative Führung des Unternehmens."},
+      {name:"Gregory Brenneman", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"Nelda Connors", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"W. Craig Kissel", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"Nancy Buese", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."}
+    ],
+    banks: [
+      {name:"JPMorgan", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Bank of America", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Wells Fargo", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Evercore", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"RBC Capital", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."}
+    ],
+    customers: [
+      {name:"Saudi Aramco", size:"large", desc:"Größter Ölkonzern der Welt, staatlich (Saudi-Arabien)."},
+      {name:"ExxonMobil", size:"large", desc:"Einer der größten Öl- und Gaskonzerne der Welt (USA)."},
+      {name:"Shell", size:"medium", desc:"Britisch-niederländischer Öl- und Gaskonzern."},
+      {name:"ConocoPhillips", size:"medium", desc:"US-amerikanischer Öl- und Gasförderer (Upstream)."},
+      {name:"Petrobras", size:"small", desc:"Brasilianischer staatlicher Ölkonzern."}
+    ],
+    suppliers: [
+      {name:"Nucor (Steel)", size:"large", desc:"US-Stahlhersteller, liefert Rohmaterial für Bohr- und Förderausrüstung."},
+      {name:"Honeywell", size:"medium", desc:"Liefert Sensorik und Steuerungstechnik für Öl-/Gasanlagen."},
+      {name:"Parker Hannifin", size:"small", desc:"Hersteller von Hydraulik- und Dichtungskomponenten."}
+    ]
+  },
+  AAPL: {
+    name: "Apple Inc.", ticker: "AAPL", sector: "Consumer Technology",
+    price: "$231.75", change: "-0.3%", changeSign:"neg",
+    marketCap:"$3.48T", peRatio:"34.7", divYield:"0.4%", week52:"$164 – $260", volume:"48M", beta:"1.05",
+    desc: "Hersteller von iPhone, Mac, iPad und Services (App Store, iCloud u.a.).",
+    holders: [
+      {name:"Vanguard Group", desc:"Einer der größten Vermögensverwalter weltweit, bekannt für passive Indexfonds."},
+      {name:"BlackRock", desc:"Größter Vermögensverwalter der Welt, u.a. Anbieter der iShares-ETFs."},
+      {name:"Berkshire Hathaway", desc:"Investmentholding von Warren Buffett, seit Jahren große Apple-Position."},
+      {name:"State Street", desc:"Vermögensverwalter, bekannt für die SPDR-ETF-Familie."},
+      {name:"Fidelity", desc:"Großer aktiver und passiver Vermögensverwalter aus den USA."}
+    ],
+    board: [
+      {name:"Tim Cook (CEO)", desc:"Vorstandsvorsitzender, verantwortlich für die operative Führung des Unternehmens."},
+      {name:"Al Gore", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"Andrea Jung", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"Monica Lozano", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"Ron Sugar", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."}
+    ],
+    banks: [
+      {name:"Morgan Stanley", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Goldman Sachs", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"JPMorgan", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"BMO Capital", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Jefferies", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."}
+    ],
+    customers: [
+      {name:"Verizon", size:"large", desc:"US-Mobilfunkanbieter, wichtiger Vertriebspartner für iPhones in den USA."},
+      {name:"AT&T", size:"large", desc:"US-Mobilfunkanbieter, vertreibt Apple-Geräte über Verträge."},
+      {name:"Best Buy", size:"medium", desc:"US-Elektronik-Einzelhändler, verkauft Apple-Produkte im Handel."},
+      {name:"T-Mobile", size:"medium", desc:"US-Mobilfunkanbieter, Vertriebspartner für Apple-Geräte."},
+      {name:"Independent Resellers", size:"small", desc:"Unabhängige Händler und autorisierte Apple-Reseller."}
+    ],
+    suppliers: [
+      {name:"TSMC", size:"large", desc:"Weltgrößter Auftrags-Chiphersteller, fertigt Apples eigene Chips (A-/M-Serie)."},
+      {name:"Foxconn", size:"large", desc:"Größter Auftragsfertiger, montiert den Großteil der iPhones."},
+      {name:"Samsung", size:"medium", desc:"Liefert u.a. OLED-Displays und Speicherchips an Apple."},
+      {name:"Corning", size:"small", desc:"Hersteller des Gorilla-Glass für iPhone-Displays."}
+    ]
+  },
+  TSLA: {
+    name: "Tesla Inc.", ticker: "TSLA", sector: "Automotive / Energy",
+    price: "$268.90", change: "+2.8%", changeSign:"pos",
+    marketCap:"$860B", peRatio:"68.3", divYield:"0%", week52:"$138 – $299", volume:"85M", beta:"2.3",
+    desc: "Hersteller von Elektrofahrzeugen sowie Energiespeicher- und Solarprodukten.",
+    holders: [
+      {name:"Vanguard Group", desc:"Einer der größten Vermögensverwalter weltweit, bekannt für passive Indexfonds."},
+      {name:"BlackRock", desc:"Größter Vermögensverwalter der Welt, u.a. Anbieter der iShares-ETFs."},
+      {name:"State Street", desc:"Vermögensverwalter, bekannt für die SPDR-ETF-Familie."},
+      {name:"Capital Group", desc:"Mutterhaus von American Funds, aktives Fondsmanagement."},
+      {name:"Baillie Gifford", desc:"Schottischer Vermögensverwalter, bekannt für Wachstumsaktien-Fokus."}
+    ],
+    board: [
+      {name:"Elon Musk (CEO)", desc:"Vorstandsvorsitzender, verantwortlich für die operative Führung des Unternehmens."},
+      {name:"Robyn Denholm", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"James Murdoch", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"Kimbal Musk", desc:"Mitglied des Board of Directors, Kontrollgremium der Unternehmensführung."},
+      {name:"JB Straubel", desc:"Mitglied des Board of Directors, Mitgründer des Unternehmens."}
+    ],
+    banks: [
+      {name:"Morgan Stanley", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Goldman Sachs", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Piper Sandler", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Wedbush", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."},
+      {name:"Citi", desc:"Investmentbank, deckt die Aktie mit Research, Rating und Kursziel ab."}
+    ],
+    customers: [
+      {name:"Hertz (Fleet)", size:"large", desc:"Autovermietung, hat in der Vergangenheit große Tesla-Flottenbestellungen getätigt."},
+      {name:"Uber (Partnerschaft)", size:"medium", desc:"Fahrdienst-Plattform, fördert Elektrifizierung der Fahrer-Flotte."},
+      {name:"Government Fleets", size:"small", desc:"Behörden- und Kommunalflotten, die E-Fahrzeuge beschaffen."}
+    ],
+    suppliers: [
+      {name:"Panasonic", size:"large", desc:"Langjähriger Batteriezellen-Partner von Tesla (u.a. Gigafactory Nevada)."},
+      {name:"CATL", size:"large", desc:"Chinesischer Batteriehersteller, liefert u.a. LFP-Zellen."},
+      {name:"Glencore (Lithium)", size:"medium", desc:"Rohstoffkonzern, liefert u.a. Kobalt und Lithium für Batterien."},
+      {name:"Various Components", size:"small", desc:"Diverse Zulieferer für Elektronik- und Karosserieteile."}
+    ]
+  }
+};
+
+const COLOR = { center: "#ff9500", holders: "#3ecf5c", board: "#ff7a3d", banks: "#4d9fff", customers: "#5eead4", suppliers: "#c084fc" };
+const CAT_LABEL = { holders: "HOLDERS", board: "BOARD", banks: "BANKS", customers: "CUSTOMERS (KUNDEN)", suppliers: "SUPPLIERS (LIEFERANTEN)" };
+const CAT_DESC = {
+  holders: "Institutionelle Investoren, die Aktien der Firma halten.",
+  board: "Kontrollgremium (Board of Directors), überwacht die Unternehmensführung.",
+  banks: "Banken, die die Aktie mit Research und Kursziel abdecken (Sell-Side).",
+  customers: "Abnehmer der Produkte/Leistungen der Firma. Symbolgröße = ungefähres Volumen.",
+  suppliers: "Lieferanten, von denen die Firma Rohstoffe oder Bauteile bezieht. Symbolgröße = ungefähres Volumen."
+};
+const SIZE_RADIUS = { large: 27, medium: 18, small: 12 };
+
+let svg, simulation, gLinks, gNodes, zoomLayer;
+let currentKey = null;
+let expanded = new Set(); // which category ids are currently expanded
+let nodePositions = new Map(); // id -> {x,y} cache so layout stays put (no re-flying)
+let customData = {}; // datasets generated on the fly for companies outside the 4 demo tickers
+
+function getDataset(key){ return DATASETS[key] || customData[key]; }
+
+const width = () => document.getElementById('graph-wrap').clientWidth;
+const height = () => document.getElementById('graph-wrap').clientHeight;
+
+function initSvg(){
+  svg = d3.select("svg");
+  svg.selectAll("*").remove();
+  zoomLayer = svg.append("g");
+  svg.call(d3.zoom().scaleExtent([0.4,2.5]).on("zoom", (ev)=> zoomLayer.attr("transform", ev.transform)));
+  svg.on("click", hideTooltip);
+  gLinks = zoomLayer.append("g").attr("class","links");
+  gNodes = zoomLayer.append("g").attr("class","nodes");
+}
+
+// items are always {name, desc, size?} objects now
+function itemLabel(item){ return item.name; }
+function itemSize(item){ return item.size || "medium"; }
+function itemDesc(item){ return item.desc || ""; }
+
+// build the currently-visible node/link set based on `expanded`
+function computeGraph(d){
+  const nodes = [{id:d.ticker, type:"center", label:d.ticker, desc:d.desc}];
+  const links = [];
+  const cats = [
+    {key:"holders", items:d.holders},
+    {key:"board", items:d.board},
+    {key:"banks", items:d.banks},
+    {key:"customers", items:d.customers},
+    {key:"suppliers", items:d.suppliers}
+  ];
+
+  cats.forEach(cat=>{
+    const catId = d.ticker + "::" + cat.key;
+    nodes.push({id:catId, type:"category", catKey:cat.key, label:CAT_LABEL[cat.key], count:cat.items.length, desc:CAT_DESC[cat.key]});
+    links.push({source:d.ticker, target:catId});
+
+    if(expanded.has(catId)){
+      cat.items.forEach(item=>{
+        const label = itemLabel(item);
+        const size = itemSize(item);
+        const desc = itemDesc(item);
+        const itemId = catId + "::" + label;
+        nodes.push({id:itemId, type:cat.key, label, size, desc});
+        links.push({source:catId, target:itemId});
+      });
+    }
+  });
+
+  return {nodes, links};
+}
+
+function getRadius(n){
+  if(n.type==="center") return 32;
+  if(n.type==="category") return 26;
+  if(n.type==="customers" || n.type==="suppliers") return SIZE_RADIUS[n.size] || 18;
+  return 18;
+}
+
+function buildGraph(key){
+  currentKey = key;
+  const d = getDataset(key);
+  if(!d) return;
+  expanded = new Set(); // reset drill-down state on ticker change
+  nodePositions = new Map(); // reset layout cache on ticker change
+  hideTooltip();
+
+  initSvg();
+  render(d);
+}
+
+function render(d){
+  const {nodes, links} = computeGraph(d);
+  const hasExisting = nodePositions.size > 0;
+
+  // seed positions: reuse cached position if we've seen this node before,
+  // otherwise spawn near its parent so newly-expanded nodes grow out
+  // locally instead of flying in from a random spot
+  nodes.forEach(n=>{
+    const cached = nodePositions.get(n.id);
+    if(cached){ n.x = cached.x; n.y = cached.y; return; }
+    let parentId = null;
+    if(n.type === "category") parentId = d.ticker;
+    else if(n.type !== "center") parentId = n.id.split("::").slice(0,2).join("::");
+    const pc = parentId ? nodePositions.get(parentId) : null;
+    if(pc){ n.x = pc.x + (Math.random()-0.5)*30; n.y = pc.y + (Math.random()-0.5)*30; }
+  });
+
+  simulation = d3.forceSimulation(nodes)
+    .alpha(hasExisting ? 0.35 : 1)
+    .alphaDecay(0.07)
+    .velocityDecay(0.55)
+    .force("link", d3.forceLink(links).id(n=>n.id).distance(l => (l.source.type==="center"||l.target.type==="center") ? 120 : 90))
+    .force("charge", d3.forceManyBody().strength(n => n.type==="category" ? -420 : -260))
+    .force("center", d3.forceCenter(width()/2, height()/2).strength(hasExisting ? 0.02 : 1))
+    .force("collision", d3.forceCollide().radius(n => getRadius(n) + 8));
+
+  const link = gLinks.selectAll("line").data(links, l=>l.source.id ? l.source.id+"-"+l.target.id : l.source+"-"+l.target)
+    .join("line").attr("class","link");
+
+  const node = gNodes.selectAll("g").data(nodes, n=>n.id)
+    .join(enter=>{
+      const g = enter.append("g")
+        .attr("class", n => "node" + (n.type==="center" ? " center" : n.type==="category" ? " category" : ""))
+        .call(d3.drag()
+          .on("start",(ev,n)=>{ if(!ev.active) simulation.alphaTarget(0.3).restart(); n.fx=n.x; n.fy=n.y; })
+          .on("drag",(ev,n)=>{ n.fx=ev.x; n.fy=ev.y; })
+          .on("end",(ev,n)=>{ if(!ev.active) simulation.alphaTarget(0); n.fx=null; n.fy=null; }))
+        .on("click",(ev,n)=>{ ev.stopPropagation(); handleNodeClick(n, d, ev); });
+      g.append("circle");
+      g.append("rect").attr("class","label-bg");
+      g.append("text").attr("class","label-text");
+      return g;
+    });
+
+  node.classed("expanded", n => n.type==="category" && expanded.has(n.id));
+
+  node.select("circle")
+    .attr("r", n=> getRadius(n))
+    .attr("fill", n=> n.type==="center" ? COLOR.center : n.type==="category" ? COLOR[n.catKey] : COLOR[n.type]);
+
+  node.select("text.label-text")
+    .attr("text-anchor","middle")
+    .attr("dy", n=> n.type==="category" ? 4 : n.type==="center" ? 4 : (-getRadius(n)-8))
+    .style("font-weight", n=> n.type==="category" ? 700 : 500)
+    .each(function(n){
+      const t = d3.select(this);
+      t.selectAll("tspan").remove();
+      if(n.type==="center"){ t.text(n.label); return; }
+      if(n.type==="category"){
+        t.text(n.label + (expanded.has(n.id) ? "  −" : `  (${n.count})`));
+        return;
+      }
+      const words = n.label.split(" ");
+      if(words.length>1 && n.label.length>12){
+        const mid = Math.ceil(words.length/2);
+        t.append("tspan").attr("x",0).attr("dy",0).text(words.slice(0,mid).join(" "));
+        t.append("tspan").attr("x",0).attr("dy",10).text(words.slice(mid).join(" "));
+      } else {
+        t.text(n.label);
+      }
+    });
+
+  // black background plate behind every label so text stays readable
+  // over crossing links and other nodes, regardless of what's underneath
+  node.select("rect.label-bg").each(function(n){
+    const textEl = this.parentNode.querySelector("text.label-text");
+    const bbox = textEl.getBBox();
+    d3.select(this)
+      .attr("x", bbox.x - 4)
+      .attr("y", bbox.y - 2)
+      .attr("width", bbox.width + 8)
+      .attr("height", bbox.height + 4)
+      .attr("rx", 2);
+  });
+
+  simulation.on("tick", ()=>{
+    link.attr("x1",l=>l.source.x).attr("y1",l=>l.source.y)
+        .attr("x2",l=>l.target.x).attr("y2",l=>l.target.y);
+    node.attr("transform", n=>`translate(${n.x},${n.y})`);
+    nodes.forEach(n=> nodePositions.set(n.id, {x:n.x, y:n.y}));
+  });
+
+  document.getElementById("nodecount").textContent = `${nodes.length} NODES · ${links.length} EDGES`;
+}
+
+function handleNodeClick(n, d, ev){
+  if(n.type === "category"){
+    if(expanded.has(n.id)) expanded.delete(n.id); else expanded.add(n.id);
+    render(d);
+    showTooltip(n, d, ev, CAT_LABEL[n.catKey], (expanded.has(n.id) ? "aufgeklappt" : "eingeklappt") + " · " + n.count + " Einträge");
+    return;
+  }
+  if(n.type === "center"){
+    openStockModal(d);
+    return;
+  }
+  showTooltip(n, d, ev, n.label, n.desc, CAT_LABEL[n.type]);
+}
+
+// small popup shown right where you clicked, explaining what that node is/does
+function showTooltip(n, d, ev, title, desc, tag){
+  const tip = document.getElementById("tooltip");
+  if(!ev){ tip.style.display = "none"; return; }
+  const wrapRect = document.getElementById("graph-wrap").getBoundingClientRect();
+  let x = ev.clientX - wrapRect.left + 14;
+  let y = ev.clientY - wrapRect.top + 14;
+  tip.innerHTML = `
+    <span class="tt-close" onclick="hideTooltip()">✕</span>
+    <div class="tt-title">${title}</div>
+    <div>${desc || "Keine weiteren Infos hinterlegt."}</div>
+    ${tag ? `<div class="tt-tag">${tag}</div>` : ""}
+  `;
+  tip.style.display = "block";
+  // clamp so the tooltip stays inside the graph area
+  const tipW = 220, tipH = tip.offsetHeight || 80;
+  if(x + tipW > wrapRect.width) x = wrapRect.width - tipW - 8;
+  if(y + tipH > wrapRect.height) y = wrapRect.height - tipH - 8;
+  tip.style.left = Math.max(8,x) + "px";
+  tip.style.top = Math.max(8,y) + "px";
+}
+function hideTooltip(){ document.getElementById("tooltip").style.display = "none"; }
+
+// full data sheet for the center node — everything important at a glance.
+// Shows the sample metrics immediately, then tries to fetch a live quote
+// from Finnhub (via our own /api/quote proxy) and swaps them in if it works.
+async function openStockModal(d){
+  document.getElementById("stock-modal").classList.add("open");
+  renderModalContent(d, { status: "loading" });
+
+  try{
+    const resp = await fetch(`/api/quote?symbol=${encodeURIComponent(d.ticker)}`);
+    const live = await resp.json();
+    if(!resp.ok) throw new Error(live.error || ("HTTP " + resp.status));
+    renderModalContent(d, { status: "live", live });
+  } catch(err){
+    console.error(err);
+    renderModalContent(d, { status: "error", message: err.message });
+  }
+}
+
+function renderModalContent(d, state){
+  const badge = d.generated ? `<span class="gen-badge">KI-GENERIERT · UNGEPRÜFT</span>` : "";
+
+  const live = state.status === "live" ? state.live : null;
+  const price     = live ? live.price     : d.price;
+  const change    = live ? live.change    : d.change;
+  const changeSign= live ? live.changeSign: d.changeSign;
+  const marketCap = live ? live.marketCap : d.marketCap;
+  const peRatio   = live ? live.peRatio   : d.peRatio;
+  const divYield  = live ? live.divYield  : d.divYield;
+  const week52    = live ? live.week52    : d.week52;
+  const beta      = live ? live.beta      : d.beta;
+
+  let statusBadge = "";
+  if(state.status === "loading"){
+    statusBadge = `<span class="gen-badge" style="color:var(--blue); border-color:var(--blue);">LADE LIVE-KURS VIA FINNHUB…</span>`;
+  } else if(state.status === "live"){
+    statusBadge = `<span class="gen-badge" style="color:var(--green); border-color:var(--green);">LIVE via Finnhub</span>`;
+  } else if(state.status === "error"){
+    statusBadge = `<span class="gen-badge" style="color:var(--red); border-color:var(--red);" title="${state.message}">LIVE-DATEN NICHT VERFÜGBAR</span>`;
+  }
+
+  const cats = [
+    {key:"holders", items:d.holders},
+    {key:"board", items:d.board},
+    {key:"banks", items:d.banks},
+    {key:"customers", items:d.customers},
+    {key:"suppliers", items:d.suppliers}
+  ];
+  const catRows = cats.map(c=>
+    `<div class="cat-row"><span><span class="cat-dot" style="background:${COLOR[c.key]}"></span>${CAT_LABEL[c.key]}</span><span>${c.items.length}</span></div>`
+  ).join("");
+
+  const footNote = state.status === "error"
+    ? `Live-Kurs konnte nicht geladen werden (${state.message}) — zeige stattdessen Beispieldaten.`
+    : state.status === "live"
+      ? "Kurs, Market Cap, KGV, Dividendenrendite, 52-Wochen-Range und Beta sind Live-Daten von Finnhub. Das Beziehungsnetzwerk bleibt weiterhin Beispieldaten."
+      : (d.generated ? "Diese Daten wurden von einer KI generiert und sind nicht verifiziert — nur zur Illustration." : "Beispieldaten für diese Demo, keine Live-Kurse.");
+
+  document.getElementById("modal-content").innerHTML = `
+    <div class="modal-title">${d.name} <span style="color:var(--text-dim); font-weight:400; font-size:14px;">(${d.ticker})</span>${badge}</div>
+    <div class="modal-sub">${d.sector}${statusBadge ? " · " : ""}${statusBadge}</div>
+    <div class="modal-desc">${d.desc || ""}</div>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="label">PRICE</div><div class="value ${changeSign}">${price} (${change})</div></div>
+      <div class="metric"><div class="label">MARKET CAP</div><div class="value">${marketCap || "–"}</div></div>
+      <div class="metric"><div class="label">P/E RATIO</div><div class="value">${peRatio || "–"}</div></div>
+      <div class="metric"><div class="label">DIV. YIELD</div><div class="value">${divYield || "–"}</div></div>
+      <div class="metric"><div class="label">52-WEEK RANGE</div><div class="value">${week52 || "–"}</div></div>
+      <div class="metric"><div class="label">VOLUME (Ø)</div><div class="value">${d.volume || "–"}</div></div>
+      <div class="metric"><div class="label">BETA</div><div class="value">${beta || "–"}</div></div>
+    </div>
+
+    <div class="modal-section-title">BEZIEHUNGSNETZWERK</div>
+    ${catRows}
+
+    <div style="margin-top:14px; font-size:10px; color:var(--text-dim); line-height:1.5;">
+      ${footNote} Klick auf einen Oberbegriffs-Knoten im Graph, um die Einträge einzeln aufzuklappen.
+    </div>
+  `;
+}
+
+function closeStockModal(){
+  document.getElementById("stock-modal").classList.remove("open");
+}
+
+function buildChips(){
+  const wrap = document.getElementById("tickers");
+  wrap.innerHTML = Object.keys(DATASETS).map(k=>
+    `<div class="ticker-chip" data-k="${k}" onclick="selectTicker('${k}')">${k}</div>`
+  ).join("");
+}
+
+function addChip(key, generated){
+  const wrap = document.getElementById("tickers");
+  if(wrap.querySelector(`[data-k="${key}"]`)) return;
+  const chip = document.createElement("div");
+  chip.className = "ticker-chip" + (generated ? " generated" : "");
+  chip.dataset.k = key;
+  chip.textContent = key;
+  chip.onclick = () => selectTicker(key);
+  wrap.appendChild(chip);
+}
+
+function selectTicker(key){
+  document.querySelectorAll(".ticker-chip").forEach(c=> c.classList.toggle("active", c.dataset.k===key));
+  buildGraph(key);
+}
+
+function setSearchLoading(on, label){
+  const status = document.getElementById("search-status");
+  const btn = document.getElementById("go-btn");
+  const input = document.getElementById("cmdline");
+  if(on){ status.style.color = ""; status.textContent = `durchsuche & erzeuge Karte für "${label}"...`; }
+  btn.disabled = on;
+  input.disabled = on;
+  btn.textContent = on ? "···" : "GO ▸";
+}
+
+async function runCommand(){
+  const raw = document.getElementById("cmdline").value.trim();
+  if(!raw) return;
+  const key = raw.toUpperCase();
+
+  if(getDataset(key)){
+    selectTicker(key);
+    document.getElementById("cmdline").value = "";
+    return;
+  }
+
+  await searchAndGenerate(raw);
+}
+document.getElementById("cmdline").addEventListener("keydown", e=>{ if(e.key==="Enter") runCommand(); });
+
+// For any company not in the demo set, ask Claude to generate an
+// illustrative relationship map with the same schema (holders, board,
+// banks, customers, suppliers). This is AI-generated, not verified data.
+async function searchAndGenerate(query){
+  setSearchLoading(true, query);
+  try{
+    const resp = await fetch("/api/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query })
+    });
+    const obj = await resp.json();
+    if(!resp.ok) throw new Error(obj.error || ("HTTP " + resp.status));
+    if(!obj.ticker || !obj.holders) throw new Error("unvollständige Antwort");
+    obj.generated = true;
+
+    const genKey = obj.ticker.toUpperCase();
+    customData[genKey] = obj;
+    addChip(genKey, true);
+    selectTicker(genKey);
+    document.getElementById("cmdline").value = "";
+    document.getElementById("search-status").textContent = "";
+  } catch(err){
+    console.error(err);
+    const status = document.getElementById("search-status");
+    status.style.color = "var(--red)";
+    status.textContent = `Fehler: konnte keine Karte für "${query}" erzeugen (${err.message}). Versuch: ${Object.keys(DATASETS).join(", ")}.`;
+    setTimeout(()=>{ status.style.color = ""; status.textContent = ""; }, 6000);
+  } finally{
+    setSearchLoading(false, query);
+  }
+}
+
+function tickClock(){
+  const now = new Date();
+  document.getElementById("clock").textContent = now.toUTCString().split(" ")[4] + " UTC";
+}
+setInterval(tickClock, 1000); tickClock();
+
+window.addEventListener("resize", ()=>{
+  if(currentKey) render(getDataset(currentKey));
+});
+
+buildChips();
+selectTicker("LNG");
+</script>
+</body>
+</html>
