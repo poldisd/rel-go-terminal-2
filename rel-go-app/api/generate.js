@@ -1,8 +1,9 @@
 // Vercel serverless function (Node.js runtime).
-// Keeps the real Anthropic API key server-side (in an env var),
-// so it's never exposed to the browser. The frontend calls
-// POST /api/generate with { query } and gets back the raw
-// Anthropic Messages API response.
+// Generates an illustrative relationship map for any company using
+// Google Gemini. The API key stays server-side (env var GEMINI_API_KEY),
+// never exposed to the browser.
+//
+// Usage: POST /api/generate  with body { "query": "Nvidia" }
 
 module.exports = async function handler(req, res) {
   if (req.method !== "POST") {
@@ -16,9 +17,9 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    res.status(500).json({ error: "Server misconfigured: ANTHROPIC_API_KEY is not set in Vercel." });
+    res.status(500).json({ error: "Server misconfigured: GEMINI_API_KEY is not set in Vercel." });
     return;
   }
 
@@ -47,28 +48,37 @@ Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt, ohne Markdown-Codeblöck
 Alle "desc"-Texte auf Deutsch, maximal 15 Wörter, sachlich, keine Spekulation. Nur das JSON-Objekt, sonst nichts.`;
 
   try {
-    const upstream = await fetch("https://api.anthropic.com/v1/messages", {
+    const model = "gemini-2.0-flash";
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
+    const upstream = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }]
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 2048,
+          responseMimeType: "application/json"
+        }
       })
     });
 
     const data = await upstream.json();
+
     if (!upstream.ok) {
-      res.status(upstream.status).json({ error: data.error?.message || "Anthropic API error" });
+      const msg = data.error?.message || `Gemini HTTP ${upstream.status}`;
+      res.status(upstream.status).json({ error: msg });
       return;
     }
 
-    const textBlocks = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-    const clean = textBlocks.replace(/```json|```/g, "").trim();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      res.status(502).json({ error: "Gemini lieferte keine verwertbare Antwort." });
+      return;
+    }
+
+    const clean = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(clean);
     res.status(200).json(parsed);
   } catch (err) {
