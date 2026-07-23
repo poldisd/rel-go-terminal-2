@@ -48,39 +48,53 @@ Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt, ohne Markdown-Codeblöck
 }
 Alle "desc"-Texte auf Deutsch, maximal 15 Wörter, sachlich, keine Spekulation. Nur das JSON-Objekt, sonst nichts.`;
 
-  try {
-    const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: "meta-llama/llama-3.3-70b-instruct:free",
-        temperature: 0.4,
-        max_tokens: 2048,
-        messages: [{ role: "user", content: prompt }]
-      })
-    });
+  // OpenRouter rotates which models are free fairly often, so try a
+  // short list in order and fall through to the next if one is gone.
+  const FREE_MODELS = [
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "google/gemma-2-9b-it:free"
+  ];
 
-    const data = await upstream.json();
+  let lastError = "Kein Modell verfügbar";
+  for (const model of FREE_MODELS) {
+    try {
+      const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.4,
+          max_tokens: 2048,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
 
-    if (!upstream.ok) {
-      const msg = data.error?.message || `OpenRouter HTTP ${upstream.status}`;
-      res.status(upstream.status).json({ error: msg });
+      const data = await upstream.json();
+
+      if (!upstream.ok) {
+        lastError = data.error?.message || `OpenRouter HTTP ${upstream.status}`;
+        continue; // try next model
+      }
+
+      const text = data.choices?.[0]?.message?.content;
+      if (!text) {
+        lastError = "OpenRouter lieferte keine verwertbare Antwort.";
+        continue;
+      }
+
+      const clean = text.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      res.status(200).json(parsed);
       return;
+    } catch (err) {
+      lastError = err.message || "Unexpected server error";
     }
-
-    const text = data.choices?.[0]?.message?.content;
-    if (!text) {
-      res.status(502).json({ error: "OpenRouter lieferte keine verwertbare Antwort." });
-      return;
-    }
-
-    const clean = text.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(clean);
-    res.status(200).json(parsed);
-  } catch (err) {
-    res.status(500).json({ error: err.message || "Unexpected server error" });
   }
+
+  res.status(502).json({ error: lastError });
 };
