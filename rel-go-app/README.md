@@ -1,7 +1,7 @@
 # REL<GO> — Relationship Map Terminal
 
 Bloomberg-Terminal-Style Beziehungsnetzwerk-Explorer (Holders, Board, Banks, Kunden, Lieferanten)
-mit optionalen Live-Kursdaten von Finnhub und optionaler KI-Firmensuche über Claude.
+mit optionalen Live-Kursdaten von Finnhub und optionaler KI-Firmensuche über OpenRouter.
 
 ## Deploy auf Vercel
 1. Repo zu deinem GitHub pushen / hochladen
@@ -14,7 +14,7 @@ In Vercel → Project → Settings → Environment Variables:
 | Name | Wert | Wofür |
 |---|---|---|
 | `FINNHUB_API_KEY` | Key von finnhub.io (Dashboard) | Live-Kurs, Market Cap, KGV, Dividendenrendite, 52-Wochen-Range, Beta beim Klick auf den Firmen-Mittelpunkt |
-| `ANTHROPIC_API_KEY` | Key von console.anthropic.com | Freie Suche nach Firmen außerhalb der 4 Demo-Ticker (LNG, BKR, AAPL, TSLA) |
+| `OPENROUTER_API_KEY` | Key von openrouter.ai/keys (kostenlos) | Freie Suche nach Firmen außerhalb der 4 Demo-Ticker (LNG, BKR, AAPL, TSLA), nutzt ein `:free`-Modell |
 
 Nach dem Eintragen: **Deployments → neuestes Deployment → "Redeploy"** (Pflicht, sonst greifen die Keys nicht).
 

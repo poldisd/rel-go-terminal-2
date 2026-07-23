@@ -1,7 +1,8 @@
 // Vercel serverless function (Node.js runtime).
 // Generates an illustrative relationship map for any company using
-// Google Gemini. The API key stays server-side (env var GEMINI_API_KEY),
-// never exposed to the browser.
+// OpenRouter's free-tier models (OpenAI-compatible API). The API key
+// stays server-side (env var OPENROUTER_API_KEY), never exposed to
+// the browser.
 //
 // Usage: POST /api/generate  with body { "query": "Nvidia" }
 
@@ -17,9 +18,9 @@ module.exports = async function handler(req, res) {
     return;
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) {
-    res.status(500).json({ error: "Server misconfigured: GEMINI_API_KEY is not set in Vercel." });
+    res.status(500).json({ error: "Server misconfigured: OPENROUTER_API_KEY is not set in Vercel." });
     return;
   }
 
@@ -48,33 +49,31 @@ Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt, ohne Markdown-Codeblöck
 Alle "desc"-Texte auf Deutsch, maximal 15 Wörter, sachlich, keine Spekulation. Nur das JSON-Objekt, sonst nichts.`;
 
   try {
-    const model = "gemini-2.0-flash";
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-
-    const upstream = await fetch(url, {
+    const upstream = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`
+      },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.4,
-          maxOutputTokens: 2048,
-          responseMimeType: "application/json"
-        }
+        model: "meta-llama/llama-3.3-70b-instruct:free",
+        temperature: 0.4,
+        max_tokens: 2048,
+        messages: [{ role: "user", content: prompt }]
       })
     });
 
     const data = await upstream.json();
 
     if (!upstream.ok) {
-      const msg = data.error?.message || `Gemini HTTP ${upstream.status}`;
+      const msg = data.error?.message || `OpenRouter HTTP ${upstream.status}`;
       res.status(upstream.status).json({ error: msg });
       return;
     }
 
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    const text = data.choices?.[0]?.message?.content;
     if (!text) {
-      res.status(502).json({ error: "Gemini lieferte keine verwertbare Antwort." });
+      res.status(502).json({ error: "OpenRouter lieferte keine verwertbare Antwort." });
       return;
     }
 
